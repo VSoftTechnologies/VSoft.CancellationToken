@@ -121,9 +121,9 @@ var
 begin
   token := TCancellationTokenSourceFactory.FTokenClass.Create as ICancellationTokenManage;
   if not Supports(token, ICancellationToken) then
-    raise Exception.Create('Registered Token class does not impleemt required interface ICancellationToken');
+    raise Exception.Create('Registered Token class does not implement required interface ICancellationToken');
   if not Supports(token, ICancellationTokenManage,theToken) then
-    raise Exception.Create('Registered Token class does not impleemt required interface ICancellationTokenManage');
+    raise Exception.Create('Registered Token class does not implement required interface ICancellationTokenManage');
   result := TCancellationTokenSource.Create(theToken);
 end;
 
