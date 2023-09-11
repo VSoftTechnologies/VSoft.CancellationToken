@@ -33,6 +33,9 @@ uses
   System.SyncObjs;
 
 type
+  //TDODO : use system.types if available.
+  TWaitResult = System.SyncObjs.TWaitResult;
+
   ///  ICancellationToken is passed to async methods
   ///  so that they can determin if the caller has
   ///  cancelled.
@@ -44,7 +47,7 @@ type
     function GetEvent : TEvent;
   {$ENDIF}
     function  IsCancelled: boolean;
-
+    function WaitFor(Timeout: Cardinal): TWaitResult;
   {$IFDEF MSWINDOWS}
     //Note : do not call SetEvent on this handle
     //as it will result in IsSignalled prop

@@ -46,6 +46,7 @@ type
     function GetEvent : TEvent;virtual;
     {$ENDIF}
     function  IsCancelled: boolean;virtual;
+    function WaitFor(Timeout: Cardinal): TWaitResult;virtual;
     procedure Cancel;virtual;
     procedure Reset;virtual;
   public
@@ -101,5 +102,10 @@ begin
 
 end;
 
+
+function TCancellationToken.WaitFor(Timeout: Cardinal): TWaitResult;
+begin
+  result := FEvent.WaitFor(Timeout);
+end;
 
 end.
