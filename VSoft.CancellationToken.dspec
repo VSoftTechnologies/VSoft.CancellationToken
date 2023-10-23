@@ -1,7 +1,7 @@
 {
   "metadata": {
     "id": "VSoft.CancellationToken",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "Enables cooperative cancellation between threads",
     "authors": "Vincent Parrett",
     "projectUrl": "https://github.com/VSoftTechnologies/VSoft.CancellationToken",
@@ -73,6 +73,11 @@
     },
     {
       "compiler": "11.0",
+      "platforms": "Win32, Win64",
+      "template": "default"
+    },
+    {
+      "compiler": "12.0",
       "platforms": "Win32, Win64",
       "template": "default"
     }
