@@ -1,43 +1,59 @@
 # DPM package spec file
-# Used to build packages
-
-min client version: 1.0
-# metadata describes the package to the user
 metadata:
   id: VSoft.CancellationToken
-  authors: [Vincent Parrett]
+  version: 0.1.7
   description: Enables cooperative cancellation between threads
+  authors:
+    - Vincent Parrett
   projectUrl: https://github.com/VSoftTechnologies/VSoft.CancellationToken
   repositoryUrl: https://github.com/VSoftTechnologies/VSoft.CancellationToken
+  repositoryCommit: d9641d5d761ea5ff891417a35bc17b03c23594b0
   license: Apache-2.0
-  readme: README.md
   copyright: Vincent Parrett and contributors
-  tags: [cancellation, async, threads]
-  version: 0.1.6
-  repositoryCommit: #HASH#
-
-# define variable defaults - can be overriden in targetPlatforms
+  tags:
+    - cancellation
+    - async
+    - threads
+  readme: README.md
 variables:
-  packageSource: "Rad Studio $compilernoprefix$"
-
-# package folder names are a mess.
+  packagesource: Rad Studio $compilernoprefix$
 targetPlatforms:
+  # package folder names are a mess.
   - compiler from: delphixe2
     compiler to: delphi10.1
-    platforms: [win32, win64]
-  - compiler from: delphi10.2
-    compiler to: delphi10.2
-    platforms: [win32, win64, linux64]
+    platforms:
+      - win32
+      - win64
+  - compiler: delphi10.2
+    platforms:
+      - win32
+      - win64
+      - linux64
   - compiler from: delphi10.3
     compiler to: delphi10.4
-    platforms: [win32, win64, macos64, linux64]
+    platforms:
+      - win32
+      - win64
+      - macos64
+      - linux64
   - compiler from: delphi11.0
-    compiler to: delphi13.0
-    platforms: [win32, win64, macos64, macosarm64, linux64]
-
+    compiler to: delphi12.0
+    platforms:
+      - win32
+      - win64
+      - macos64
+      - macosarm64
+      - linux64
+  - compiler: delphi13.0
+    platforms:
+      - win32
+      - win64
+      - winarm64ec
+      - macos64
+      - macosarm64
+      - linux64
 templates:
   - name: default
-
     source:
       - src: ./LICENSE.txt
       - src: ./source/*.pas
