@@ -119,14 +119,22 @@ type
 
 class function TCancellationTokenSourceFactory.Create: ICancellationTokenSource;
 var
-  token : IInterface;
+  tokenObj : TCancellationTokenBase;
+  token : ICancellationToken;
   theToken : ICancellationTokenManage;
 begin
-  token := TCancellationTokenSourceFactory.FTokenClass.Create as ICancellationTokenManage;
-  if not Supports(token, ICancellationToken) then
-    raise Exception.Create('Registered Token class does not implement required interface ICancellationToken');
-  if not Supports(token, ICancellationTokenManage,theToken) then
-    raise Exception.Create('Registered Token class does not implement required interface ICancellationTokenManage');
+  //The new instance has a reference count of 0, so it is queried with
+  //GetInterface (Supports would free it when the query fails) and freed
+  //here if it is rejected before an interface reference owns it.
+  tokenObj := TCancellationTokenSourceFactory.FTokenClass.Create;
+  if not tokenObj.GetInterface(ICancellationToken, token) then
+  begin
+    tokenObj.Free;
+    raise EIntfCastError.Create('Registered Token class does not implement required interface ICancellationToken');
+  end;
+  //From here token owns the instance, so raising releases it.
+  if not tokenObj.GetInterface(ICancellationTokenManage, theToken) then
+    raise EIntfCastError.Create('Registered Token class does not implement required interface ICancellationTokenManage');
   result := TCancellationTokenSource.Create(theToken);
 end;
 
@@ -137,6 +145,8 @@ end;
 
 class procedure TCancellationTokenSourceFactory.RegisterTokenClass(const value: TCancellationTokenClass);
 begin
+  if value = nil then
+    raise EArgumentNilException.Create('RegisterTokenClass: value must not be nil');
   TCancellationTokenSourceFactory.FTokenClass := value;
 end;
 

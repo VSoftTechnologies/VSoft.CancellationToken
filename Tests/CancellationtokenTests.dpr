@@ -64,7 +64,11 @@ begin
     {$ENDIF}
   except
     on E: Exception do
+    begin
       System.Writeln(E.ClassName, ': ', E.Message);
+      //The run did not complete: never report that as success.
+      System.ExitCode := EXIT_ERRORS;
+    end;
   end;
 {$ENDIF}
 end.

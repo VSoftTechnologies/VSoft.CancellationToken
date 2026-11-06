@@ -14,11 +14,13 @@ type
 
   public
 
-    [SetupFixture]
-    procedure SetupFixture;
+    //A new source for every test, so no test depends on the state another
+    //one left behind.
+    [Setup]
+    procedure Setup;
 
-    [TeardownFixture]
-    procedure TeardownFixture;
+    [TearDown]
+    procedure TearDown;
 
     [Test]
     procedure TestCancel;
@@ -33,6 +35,23 @@ type
 
   end;
 
+  [TestFixture]
+  TCancellationTokenFactoryTests = class
+  public
+    //Puts the default token class back after each test.
+    [TearDown]
+    procedure TearDown;
+
+    [Test]
+    procedure TestRegisterNilRaises;
+
+    [Test]
+    procedure TestFactoryRejectsClassWithoutTokenInterface;
+
+    [Test]
+    procedure TestFactoryRejectsClassWithoutManageInterface;
+  end;
+
 implementation
 
 uses
@@ -40,21 +59,95 @@ uses
   System.SysUtils,
   System.SyncObjs,
   System.Diagnostics,
-  WinApi.Windows;
+  WinApi.Windows,
+  VSoft.CancellationToken.Impl;
 
 const
+  cWorkerTimeout = 10000;
   cRaceRounds = 50000;
   cRaceJitter = 64;
 
+type
+  //Implements neither token interface.
+  TNoInterfaceToken = class(TCancellationTokenBase)
+  public
+    class var LiveCount : integer;
+    constructor Create;override;
+    destructor Destroy;override;
+  end;
+
+  //Implements ICancellationToken but not ICancellationTokenManage.
+  TReadOnlyToken = class(TCancellationTokenBase, ICancellationToken)
+  protected
+    {$IFDEF MSWINDOWS}
+    function GetHandle : THandle;
+    {$ELSE}
+    function GetEvent : TEvent;
+    {$ENDIF}
+    function IsCancelled : boolean;
+    function WaitFor(Timeout : Cardinal) : TWaitResult;
+  public
+    class var LiveCount : integer;
+    constructor Create;override;
+    destructor Destroy;override;
+  end;
+
+{ TNoInterfaceToken }
+
+constructor TNoInterfaceToken.Create;
+begin
+  TInterlocked.Increment(LiveCount);
+end;
+
+destructor TNoInterfaceToken.Destroy;
+begin
+  TInterlocked.Decrement(LiveCount);
+  inherited;
+end;
+
+{ TReadOnlyToken }
+
+constructor TReadOnlyToken.Create;
+begin
+  TInterlocked.Increment(LiveCount);
+end;
+
+destructor TReadOnlyToken.Destroy;
+begin
+  TInterlocked.Decrement(LiveCount);
+  inherited;
+end;
+
+{$IFDEF MSWINDOWS}
+function TReadOnlyToken.GetHandle : THandle;
+begin
+  result := 0;
+end;
+{$ELSE}
+function TReadOnlyToken.GetEvent : TEvent;
+begin
+  result := nil;
+end;
+{$ENDIF}
+
+function TReadOnlyToken.IsCancelled : boolean;
+begin
+  result := false;
+end;
+
+function TReadOnlyToken.WaitFor(Timeout : Cardinal) : TWaitResult;
+begin
+  result := wrError;
+end;
 
 { TCancellationTokenTests }
 
-procedure TCancellationTokenTests.SetupFixture;
+procedure TCancellationTokenTests.Setup;
 begin
   FTokenSource := TCancellationTokenSourceFactory.Create;
 end;
 
-procedure TCancellationTokenTests.TeardownFixture;
+procedure TCancellationTokenTests.TearDown;
 begin
   FTokenSource := nil;
 end;
@@ -62,71 +155,139 @@ end;
 procedure TCancellationTokenTests.TestCancel;
 var
   token : ICancellationToken;
-  cancelled : boolean;
+  started : TEvent;
+  sawIt : TEvent;
+  worker : TThread;
 begin
-  FTokenSource.Reset;
-  cancelled := false;
   token := FTokenSource.Token;
-  TThread.CreateAnonymousThread(
-    procedure
-    var
-      ltoken : ICancellationToken;
-    begin
-      lToken := token;
-      while not lToken.IsCancelled do
+  started := TEvent.Create(nil, true, false, '');
+  sawIt := TEvent.Create(nil, true, false, '');
+  try
+    //The worker reports through events, not a shared flag, and gives up
+    //after cWorkerTimeout instead of polling for ever.
+    worker := TThread.CreateAnonymousThread(
+      procedure
+      var
+        stopwatch : TStopwatch;
       begin
-        Sleep(1);
-        cancelled := lToken.IsCancelled;
-      end;
-    end).Start;
-//    testThread.Start;
-    TThread.Sleep(100);
-    FTokenSource.Cancel;
-    TThread.Sleep(50);
-    Assert.IsTrue(cancelled);
+        stopwatch := TStopwatch.StartNew;
+        started.SetEvent;
+        while (not token.IsCancelled) and (stopwatch.ElapsedMilliseconds < cWorkerTimeout) do
+          TThread.Sleep(1);
+        if token.IsCancelled then
+          sawIt.SetEvent;
+      end);
+    worker.FreeOnTerminate := false;
+    try
+      worker.Start;
+      Assert.AreEqual<TWaitResult>(wrSignaled, started.WaitFor(cWorkerTimeout), 'The worker did not start');
+      Assert.AreEqual<TWaitResult>(wrTimeout, sawIt.WaitFor(0), 'The worker saw a cancellation before Cancel');
+      FTokenSource.Cancel;
+      Assert.AreEqual<TWaitResult>(wrSignaled, sawIt.WaitFor(cWorkerTimeout), 'The worker never saw IsCancelled = True');
+    finally
+      worker.WaitFor;
+      worker.Free;
+    end;
+  finally
+    sawIt.Free;
+    started.Free;
+  end;
 end;
 
 
 procedure TCancellationTokenTests.TestCancelUsingHandle;
 var
   token : ICancellationToken;
-  cancelled : boolean;
+  other : TEvent;
+  worker : TThread;
+  waitResult : Cardinal;
 begin
-  FTokenSource.Reset;
-  cancelled := false;
   token := FTokenSource.Token;
-  TThread.CreateAnonymousThread(
-    procedure
-    var
-      res : integer;
-      ltoken : ICancellationToken;
-      event : TEvent;
-      handles : array[0..1] of THandle;
-    begin
-      lToken := token;
-      event := TEvent.Create(nil,false, false,'');
-      handles[0] := lToken.Handle;
-      handles[1] := event.Handle;
-      try
-        while true do
-        begin
-          res := WaitForMultipleObjects(2, @handles, false, 2000);
-          if res = WAIT_OBJECT_0 then
-          begin
-            //token was cancelled
-            cancelled := true;
-            exit;
-          end;
-        end;
+  other := TEvent.Create(nil, false, false, '');
+  waitResult := WAIT_FAILED;
+  try
+    Assert.AreEqual<Cardinal>(WAIT_TIMEOUT, WaitForSingleObject(token.Handle, 0), 'The handle was signalled before Cancel');
+    worker := TThread.CreateAnonymousThread(
+      procedure
+      var
+        handles : array[0..1] of THandle;
+      begin
+        handles[0] := token.Handle;
+        handles[1] := other.Handle;
+        //One wait with a limit: a timeout or WAIT_FAILED ends the worker
+        //and is reported, instead of looping for ever.
+        waitResult := WaitForMultipleObjects(2, @handles, false, cWorkerTimeout);
+      end);
+    worker.FreeOnTerminate := false;
+    try
+      worker.Start;
+      FTokenSource.Cancel;
+    finally
+      worker.WaitFor;
+      worker.Free;
+    end;
+    Assert.AreEqual<Cardinal>(WAIT_OBJECT_0, waitResult, 'The wait did not end on the token''s handle');
+  finally
+    other.Free;
+  end;
+end;
 
-      finally
-        event.Free;
-      end;
-    end).Start;
-    TThread.Sleep(100);
-    FTokenSource.Cancel;
-    TThread.Sleep(50);
-    Assert.IsTrue(cancelled);
+{ TCancellationTokenFactoryTests }
+
+procedure TCancellationTokenFactoryTests.TearDown;
+begin
+  TCancellationTokenSourceFactory.RegisterTokenClass(TCancellationToken);
+end;
+
+procedure TCancellationTokenFactoryTests.TestRegisterNilRaises;
+var
+  source : ICancellationTokenSource;
+begin
+  Assert.WillRaise(
+    procedure
+    begin
+      TCancellationTokenSourceFactory.RegisterTokenClass(nil);
+    end, EArgumentNilException, 'RegisterTokenClass(nil) was accepted');
+  //The registered class is still the default one.
+  source := TCancellationTokenSourceFactory.Create;
+  source.Cancel;
+  Assert.IsTrue(source.Token.IsCancelled);
+end;
+
+procedure TCancellationTokenFactoryTests.TestFactoryRejectsClassWithoutTokenInterface;
+var
+  msg : string;
+begin
+  msg := '';
+  TNoInterfaceToken.LiveCount := 0;
+  TCancellationTokenSourceFactory.RegisterTokenClass(TNoInterfaceToken);
+  try
+    TCancellationTokenSourceFactory.Create;
+    Assert.Fail('Create accepted a class with no token interface');
+  except
+    on E : EIntfCastError do
+      msg := E.Message;
+  end;
+  Assert.AreEqual(0, TNoInterfaceToken.LiveCount, 'The rejected instance was leaked');
+  Assert.AreEqual('Registered Token class does not implement required interface ICancellationToken', msg, false);
+end;
+
+procedure TCancellationTokenFactoryTests.TestFactoryRejectsClassWithoutManageInterface;
+var
+  msg : string;
+begin
+  msg := '';
+  TReadOnlyToken.LiveCount := 0;
+  TCancellationTokenSourceFactory.RegisterTokenClass(TReadOnlyToken);
+  try
+    TCancellationTokenSourceFactory.Create;
+    Assert.Fail('Create accepted a class without ICancellationTokenManage');
+  except
+    on E : EIntfCastError do
+      msg := E.Message;
+  end;
+  Assert.AreEqual(0, TReadOnlyToken.LiveCount, 'The rejected instance was leaked');
+  Assert.AreEqual('Registered Token class does not implement required interface ICancellationTokenManage', msg, false);
 end;
 
 procedure TCancellationTokenTests.TestCancelResetRace;
@@ -223,5 +384,6 @@ end;
 
 initialization
   TDUnitX.RegisterTestFixture(TCancellationTokenTests);
+  TDUnitX.RegisterTestFixture(TCancellationTokenFactoryTests);
 
 end.
