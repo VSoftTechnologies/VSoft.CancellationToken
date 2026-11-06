@@ -39,6 +39,8 @@ type
   private
     FEvent : TEvent;
     FIsCancelled : boolean;
+    //Serialises Cancel and Reset, which each change two things.
+    FLock : TCriticalSection;
   protected
     {$IFDEF MSWINDOWS}
     function  GetHandle: THandle;virtual;
@@ -61,12 +63,19 @@ implementation
 
 procedure TCancellationToken.Cancel;
 begin
-  FIsCancelled := true;
-  FEvent.SetEvent;
+  //Flag before event, so a thread released by the event sees IsCancelled = True.
+  FLock.Enter;
+  try
+    FIsCancelled := true;
+    FEvent.SetEvent;
+  finally
+    FLock.Leave;
+  end;
 end;
 
 constructor TCancellationToken.Create;
 begin
+  FLock := TCriticalSection.Create;
   FEvent := TEvent.Create(nil, true, false,'');
   FIsCancelled := false;
 end;
@@ -75,6 +84,7 @@ destructor TCancellationToken.Destroy;
 begin
   FEvent.SetEvent;// in case anything is waiting on this
   FEvent.Free;
+  FLock.Free;
   inherited;
 end;
 
@@ -97,8 +107,14 @@ end;
 
 procedure TCancellationToken.Reset;
 begin
-  FEvent.ResetEvent;
-  FIsCancelled := false;
+  //Event before flag, so the event is never left set with the flag cleared.
+  FLock.Enter;
+  try
+    FEvent.ResetEvent;
+    FIsCancelled := false;
+  finally
+    FLock.Leave;
+  end;
 
 end;
 
